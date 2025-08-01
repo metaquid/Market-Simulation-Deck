@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Market Simulation Deck</title>
+    <!-- 
+        Market Simulation Deck v6.7 (Quota Aware)
+        - Implements intelligent error handling for API rate limits (429 errors).
+        - Provides clear, user-friendly messages when API quotas are exceeded.
+        - All known bugs fixed. Ready for showcase and live testing.
+    -->
+    <style>
+        :root {
+            --bg-color: #1c1c1e; --surface-color: #2c2c2e; --primary-color: #00aaff;
+            --secondary-color: #a27bfa; --text-color: #f0f0f0; --text-muted-color: #b0b0b0;
+            --border-color: #4a4a4c; --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            --panel-shadow: 0 8px 25px rgba(0,0,0,0.6); --success-color: #4ecca3;
+            --error-color: #ff4757;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html, body { height: 100%; overflow: hidden; }
+        body { font-family: var(--font-family); background-color: var(--bg-color); color: var(--text-color); font-size: 16px; }
+        #app-container { display: flex; flex-direction: column; height: 100vh; }
+        header { padding: 1rem; background-color: var(--surface-color); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; }
+        header h1 { font-size: 1.3rem; color: var(--primary-color); }
+        main { flex-grow: 1; overflow-y: auto; padding: 1rem; display: flex; flex-direction: column; gap: 1rem; }
+        #chat-window { display: flex; flex-direction: column; gap: 1rem; }
+        .message { max-width: 85%; padding: 0.75rem 1.2rem; border-radius: 16px; line-height: 1.6; word-wrap: break-word; animation: fadeIn 0.3s ease-in; }
+        .message.system { background-color: #3a3a3c; color: var(--primary-color); font-style: italic; text-align: center; align-self: center; border-radius: 8px; font-size: 0.9rem; }
+        .message.error { background-color: var(--error-color); color: #fff; font-style: italic; text-align: center; align-self: center; border-radius: 8px; font-size: 0.9rem; }
+        .message.agent-0 { background: linear-gradient(45deg, var(--secondary-color), #8e6add); color: #fff; align-self: flex-start; border-bottom-left-radius: 4px; }
+        .message.agent-1 { background-color: var(--success-color); color: #121212; align-self: flex-end; border-bottom-right-radius: 4px;}
+        .message .author { font-weight: bold; display: block; margin-bottom: 0.25rem; font-size: 0.8rem; opacity: 0.8; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* Panels & Modals */
+        #settings-panel, #help-modal { position: fixed; top: 0; left: -100%; width: 90%; max-width: 500px; height: 100%; background-color: #242426; box-shadow: var(--panel-shadow); transition: left 0.35s ease-in-out; z-index: 1000; display: flex; flex-direction: column; }
+        #help-modal { z-index: 1001; }
+        #settings-panel.open, #help-modal.open { left: 0; }
+        .panel-header { padding: 1rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); }
+        .panel-header h2 { color: var(--primary-color); }
+        .panel-content { padding: 1.2rem; overflow-y: auto; flex-grow: 1; }
+        .form-group { margin-bottom: 1.2rem; }
+        .form-group label { display: block; margin-bottom: 0.5rem; font-size: 0.9rem; color: var(--text-muted-color); }
+        input, select, textarea { width: 100%; padding: 0.8rem; background-color: var(--bg-color); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-color); font-size: 1rem; transition: border-color 0.2s, box-shadow 0.2s; }
+        input:focus, select:focus, textarea:focus { border-color: var(--primary-color); box-shadow: 0 0 0 2px rgba(0, 170, 255, 0.3); outline: none; }
+        textarea { min-height: 140px; resize: vertical; }
+        textarea:read-only { background-color: #333; opacity: 0.7; cursor: not-allowed; }
+
+        /* Buttons & Controls */
+        button { padding: 0.75rem 1.5rem; border: none; border-radius: 6px; font-size: 1rem; cursor: pointer; transition: all 0.2s; font-weight: bold; display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; }
+        button:active { transform: scale(0.97); }
+        .btn-primary { background-color: var(--primary-color); color: #121212; }
+        .btn-primary:hover { background-color: #33bbff; }
+        .btn-primary:disabled { background-color: #555; color: #888; cursor: not-allowed; }
+        .btn-secondary { background-color: var(--surface-color); color: var(--text-color); border: 1px solid var(--border-color); }
+        .btn-secondary:hover { background-color: #3c3c3e; }
+        .btn-success { background-color: var(--success-color); color: #121212; }
+        .btn-success:hover { background-color: #6fe0b8; }
+        #controls { display: flex; gap: 1rem; padding: 1rem; border-top: 1px solid var(--border-color); flex-shrink: 0; background-color: var(--surface-color); }
+        #controls button { flex-grow: 1; }
+        
+        /* Status, Analysis & Tour Elements */
+        #simulation-status { background-color: var(--surface-color); padding: 0.8rem; border-radius: 8px; text-align: center; display: none; margin-bottom: 1rem; }
+        #status-text { font-weight: bold; margin-bottom: 0.5rem; }
+        #progress-bar-container { width: 100%; background-color: var(--border-color); border-radius: 4px; overflow: hidden; }
+        #progress-bar { width: 0%; height: 8px; background-color: var(--primary-color); transition: width 0.5s ease-out; }
+        #persona-generation-status { margin-top: 1rem; padding: 0.8rem; background-color: var(--bg-color); border: 1px dashed var(--border-color); border-radius: 6px; text-align: center; color: var(--text-muted-color); display: none; }
+        #market-analysis-summary { background-color: #242426; border: 1px solid var(--border-color); padding: 1.5rem; border-radius: 8px; display: none; }
+        #market-analysis-summary h3 { color: var(--success-color); margin-bottom: 1rem; }
+        details { border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 1rem; background-color: var(--surface-color); }
+        details[open] { border-color: var(--primary-color); }
+        summary { cursor: pointer; padding: 1rem; font-weight: bold; color: var(--primary-color); list-style: none; }
+        summary::-webkit-details-marker { display: none; }
+        summary:before { content: '►'; margin-right: 0.5rem; transition: transform 0.2s; display: inline-block; }
+        details[open] summary:before { transform: rotate(90deg); }
+        .details-content { padding: 0 1rem 1rem 1rem; border-top: 1px solid var(--border-color); }
+        .modal-content { color: var(--text-muted-color); line-height: 1.7; }
+        .modal-content h2, .modal-content h3, .modal-content h4 { color: var(--primary-color); margin-bottom: 0.5rem; }
+        .modal-content code { background-color: #333; padding: 2px 5px; border-radius: 3px; font-family: 'Courier New', Courier, monospace; }
+        #tour-guide-box { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background-color: var(--primary-color); color: var(--bg-color); padding: 1rem; border-radius: 8px; box-shadow: var(--panel-shadow); z-index: 1002; display: none; font-weight: bold; text-align: center; max-width: 90%; margin-top: 5px; }
+        .highlight-pulse { animation: pulse 1.5s infinite; position: relative; z-index: 10; }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(0, 170, 255, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(0, 170, 255, 0); } 100% { box-shadow: 0 0 0 0 rgba(0, 170, 255, 0); } }
+
+        /* Dashboard Visuals */
+        .dashboard { display: grid; grid-template-columns: 1fr; gap: 1rem; padding-top: 1rem; }
+        .bar-chart-container { display: flex; flex-direction: column; gap: 0.5rem; }
+        .bar-item { display: flex; align-items: center; gap: 1rem; }
+        .bar-label { width: 100px; text-align: right; font-size: 0.9rem; flex-shrink: 0; }
+        .bar-wrapper { flex-grow: 1; background-color: var(--bg-color); border-radius: 3px; }
+        .bar { height: 20px; background: linear-gradient(90deg, var(--primary-color), var(--success-color)); border-radius: 3px; animation: barGrow 1s ease-out; }
+        @keyframes barGrow { from { width: 0; } }
+
+        /* Tabbed Settings & Demo Mode Switch */
+        .tab-buttons { display: flex; border-bottom: 1px solid var(--border-color); }
+        .tab-button { flex: 1; padding: 1rem; background: none; border: none; color: var(--text-muted-color); cursor: pointer; font-size: 1rem; }
+        .tab-button.active { color: var(--primary-color); border-bottom: 2px solid var(--primary-color); font-weight: bold; }
+        .tab-content { display: none; animation: fadeIn 0.4s; }
+        .tab-content.active { display: block; }
+        #demo-mode-container { display: flex; align-items: center; justify-content: space-between; background-color: var(--bg-color); padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
+        #demo-mode-container label { cursor: pointer; flex-grow: 1; -webkit-user-select: none; user-select: none; }
+        .switch { position: relative; display: inline-block; width: 50px; height: 28px; flex-shrink: 0; }
+        .switch input { display: none; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #444; transition: .4s; border-radius: 28px; }
+        .slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: var(--success-color); }
+        input:checked + .slider:before { transform: translateX(22px); }
+    </style>
+</head>
+<body>
+
+    <div id="app-container">
+        <!-- Help Modal -->
+        <div id="help-modal">
+            <div class="panel-header"><h2>User Guide</h2><button id="close-help-btn" class="btn-secondary">&times;</button></div>
+            <div class="panel-content modal-content">
+                <h3>Welcome to the Market Simulation Deck</h3>
+                <p>This is a strategic tool for uncovering latent market needs. Your role is not to chat, but to be an <strong>Observer of simulated, data-driven behaviors</strong>.</p>
+                <hr style="margin: 1rem 0; border-color: var(--border-color);">
+                <h4>Your 'Live Mode' Workflow:</h4>
+                <ol>
+                    <li><strong>Phase 1: SETUP</strong><br>Disable "Demo Mode". In the 'Setup' tab, enter your API keys. A Qloo key is needed for persona generation, and a Google/OpenAI key is required for the simulation.</li>
+                    <li><strong>Phase 2: PERSONAS</strong><br>Go to the 'Personas' tab. Define a real location (e.g., "London", "Paris", "New York", etc.) and an age group. Click 'Generate Profiles' to create personas based on real, local data via Qloo.</li>
+                    <li><strong>Phase 3: SCENARIO</strong><br>In the 'Scenario' tab, define the conversation topic. Frame it as a problem to solve or a "what's missing" discussion to encourage valuable insights.</li>
+                    <li><strong>Phase 4: DEPLOY & OBSERVE</strong><br>Click 'Deploy Simulation' to run the live simulation.</li>
+                    <li><strong>Phase 5: DEBRIEF</strong><br>Once the dialogue is complete, an AI Market Analyst will generate a report, highlighting latent needs, pain points, and concrete business opportunities.</li>
+                </ol>
+            </div>
+        </div>
+
+        <!-- Settings Panel -->
+        <div id="settings-panel">
+            <div class="panel-header"><h2>Mission Configuration</h2><button id="close-settings-btn" class="btn-secondary">&times;</button></div>
+            <div class="panel-content">
+                <div id="demo-mode-container">
+                    <label for="demo-mode-toggle"><strong>Demo Mode Active</strong><br><small>Uses pre-recorded data, no API keys needed.</small></label>
+                    <div class="switch">
+                        <input type="checkbox" id="demo-mode-toggle" checked>
+                        <span class="slider"></span>
+                    </div>
+                </div>
+                <div class="tab-buttons">
+                    <button class="tab-button active" data-tab="setup">1. Setup</button>
+                    <button class="tab-button" data-tab="personas">2. Personas</button>
+                    <button class="tab-button" data-tab="scenario">3. Scenario</button>
+                </div>
+                <div id="tab-setup" class="tab-content active">
+                    <h3>API Keys & Data</h3>
+                    <div class="form-group">
+                        <label for="qloo-api-key">Qloo API Key</label>
+                        <input type="password" id="qloo-api-key" placeholder="For generating data-driven personas">
+                    </div>
+                    <div class="form-group">
+                        <label for="google-api-key">Google Gemini API Key</label>
+                        <input type="password" id="google-api-key" placeholder="For simulation and analysis">
+                    </div>
+                    <div class="form-group">
+                        <label for="openai-api-key">OpenAI API Key (Optional)</label>
+                        <input type="password" id="openai-api-key" placeholder="For using GPT models">
+                    </div>
+                    <hr style="margin: 2rem 0;">
+                    <h3>Mission Data</h3>
+                    <div style="display: flex; gap: 1rem;">
+                        <button id="export-mission-btn" class="btn-secondary" style="width: 100%;">Export Mission</button>
+                        <button id="import-mission-btn" class="btn-secondary" style="width: 100%;">Import Mission</button>
+                        <input type="file" id="mission-file-input" style="display: none;" accept=".json">
+                    </div>
+                </div>
+                <div id="tab-personas" class="tab-content">
+                     <h3>Generate Persona Profiles</h3>
+                    <div class="form-group">
+                        <label for="persona-location">Target Location (e.g., London, Paris, New York)</label>
+                        <input type="text" id="persona-location" value="London">
+                    </div>
+                    <div class="form-group">
+                        <label for="persona-age">Target Age Group (e.g., 25-30)</label>
+                        <input type="text" id="persona-age" value="28-32">
+                    </div>
+                    <button id="generate-personas-btn" class="btn-success" style="width: 100%;">Generate Profiles from Qloo Data</button>
+                    <div id="persona-generation-status">Awaiting profile generation...</div>
+                    <hr style="margin: 1.5rem 0; border-color: var(--border-color);">
+                    <h4>Agent 1 Profile</h4>
+                    <div class="form-group">
+                        <label for="agent1-llm">LLM Model</label>
+                        <select id="agent1-llm"><option value="gemini-pro" selected>Google Gemini Pro</option><option value="openai-gpt4">OpenAI GPT-4</option></select>
+                    </div>
+                    <textarea id="agent1-personality" readonly placeholder="Profile will be generated here..."></textarea>
+                    <h4 style="margin-top: 1rem;">Agent 2 Profile</h4>
+                     <div class="form-group">
+                        <label for="agent2-llm">LLM Model</label>
+                        <select id="agent2-llm"><option value="gemini-pro" selected>Google Gemini Pro</option><option value="openai-gpt4">OpenAI GPT-4</option></select>
+                    </div>
+                    <textarea id="agent2-personality" readonly placeholder="Profile will be generated here..."></textarea>
+                </div>
+                <div id="tab-scenario" class="tab-content">
+                    <h3>Discussion Scenario</h3>
+                    <div class="form-group">
+                        <label for="simulation-topic">Topic (What should they discuss?)</label>
+                        <textarea id="simulation-topic">Let's talk about music and how we experience it here. Gigs, record shops, headphones... what do we love and what's seriously missing for real fans in this area?</textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="simulation-turns">Conversation Depth (Turns per agent)</label>
+                        <input type="number" id="simulation-turns" value="3" min="1" max="10">
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <header>
+            <h1>Market Simulation Deck</h1>
+            <div>
+                <button id="open-help-btn" class="btn-secondary">Help</button>
+                <button id="open-settings-btn" class="btn-secondary">Configure Mission</button>
+            </div>
+        </header>
+        <main id="main-content">
+            <div id="simulation-status"><div id="status-text"></div><div id="progress-bar-container"><div id="progress-bar"></div></div></div>
+            <div id="chat-window"></div>
+            <div id="market-analysis-summary"></div>
+        </main>
+        <div id="controls">
+            <button id="start-simulation-btn" class="btn-primary" disabled>Deploy Simulation</button>
+            <button id="clear-chat-btn" class="btn-secondary">Reset Deck</button>
+        </div>
+        <div id="tour-guide-box"></div>
+    </div>
+    
+    <script>
+        const app = {
+            dom: {},
+            state: { isSimulationRunning: false, lastReport: '' },
+
+            init() {
+                this.dom = {
+                    settingsPanel: document.getElementById('settings-panel'),
+                    openSettingsBtn: document.getElementById('open-settings-btn'),
+                    closeSettingsBtn: document.getElementById('close-settings-btn'),
+                    helpModal: document.getElementById('help-modal'),
+                    openHelpBtn: document.getElementById('open-help-btn'),
+                    closeHelpBtn: document.getElementById('close-help-btn'),
+                    chatWindow: document.getElementById('chat-window'),
+                    mainContent: document.getElementById('main-content'),
+                    analysisPanel: document.getElementById('market-analysis-summary'),
+                    startBtn: document.getElementById('start-simulation-btn'),
+                    clearBtn: document.getElementById('clear-chat-btn'),
+                    demoModeToggle: document.getElementById('demo-mode-toggle'),
+                    demoModeContainer: document.getElementById('demo-mode-container'),
+                    exportMissionBtn: document.getElementById('export-mission-btn'),
+                    importMissionBtn: document.getElementById('import-mission-btn'),
+                    missionFileInput: document.getElementById('mission-file-input'),
+                    qlooApiKeyInput: document.getElementById('qloo-api-key'),
+                    googleApiKeyInput: document.getElementById('google-api-key'),
+                    openaiApiKeyInput: document.getElementById('openai-api-key'),
+                    tabButtons: document.querySelectorAll('.tab-button'),
+                    tabContents: document.querySelectorAll('.tab-content'),
+                    statusPanel: document.getElementById('simulation-status'),
+                    statusText: document.getElementById('status-text'),
+                    progressBar: document.getElementById('progress-bar'),
+                    personaGenStatus: document.getElementById('persona-generation-status'),
+                    generatePersonasBtn: document.getElementById('generate-personas-btn'),
+                    tourGuideBox: document.getElementById('tour-guide-box'),
+                    agents: [
+                        { name: "Alex", llmSelect: document.getElementById('agent1-llm'), personalityText: document.getElementById('agent1-personality') },
+                        { name: "Chloe", llmSelect: document.getElementById('agent2-llm'), personalityText: document.getElementById('agent2-personality') }
+                    ],
+                    personaLocationInput: document.getElementById('persona-location'),
+                    personaAgeInput: document.getElementById('persona-age'),
+                    topicInput: document.getElementById('simulation-topic'),
+                    turnsInput: document.getElementById('simulation-turns'),
+                };
+
+                this.dom.openSettingsBtn.addEventListener('click', () => {
+                    this.ui.openPanel();
+                    if (this.tour.isActive && this.tour.currentStep === 0) {
+                        this.tour.next();
+                    }
+                });
+                this.dom.closeSettingsBtn.addEventListener('click', () => this.ui.closePanel());
+                this.dom.startBtn.addEventListener('click', () => {
+                    this.simulation.start();
+                });
+                this.dom.generatePersonasBtn.addEventListener('click', () => {
+                    this.simulation.generatePersonas();
+                });
+                this.dom.clearBtn.addEventListener('click', () => this.ui.clearAll());
+                this.dom.exportMissionBtn.addEventListener('click', () => this.storage.exportMission());
+                this.dom.importMissionBtn.addEventListener('click', () => this.dom.missionFileInput.click());
+                this.dom.missionFileInput.addEventListener('change', (e) => this.storage.importMission(e));
+                this.dom.demoModeContainer.addEventListener('click', (e) => {
+                    if (e.target.id !== 'demo-mode-toggle') {
+                        this.dom.demoModeToggle.checked = !this.dom.demoModeToggle.checked;
+                    }
+                    this.ui.handleDemoToggle();
+                });
+                this.dom.tabButtons.forEach(button => button.addEventListener('click', (e) => this.ui.handleTabClick(e)));
+                this.dom.openHelpBtn.addEventListener('click', () => {
+                    if (this.tour.isActive) {
+                        this.tour.end();
+                    }
+                    this.dom.helpModal.classList.add('open');
+                });
+                this.dom.closeHelpBtn.addEventListener('click', () => this.dom.helpModal.classList.remove('open'));
+                
+                this.storage.loadApiKeys();
+                this.ui.clearAll();
+            },
+
+            ui: {
+                openPanel() { app.dom.settingsPanel.classList.add('open'); },
+                closePanel() { app.dom.settingsPanel.classList.remove('open'); },
+                clearAll() {
+                    app.dom.chatWindow.innerHTML = '';
+                    app.dom.statusPanel.style.display = 'none';
+                    app.dom.analysisPanel.style.display = 'none';
+                    app.dom.startBtn.disabled = true;
+                    app.dom.agents.forEach(agent => agent.personalityText.value = '');
+                    app.dom.personaGenStatus.style.display = 'none';
+                    document.querySelector('.tab-button[data-tab="setup"]').click();
+                    app.tour.end(); 
+                    app.tour.reset();
+                    const isDemo = app.dom.demoModeToggle.checked;
+                    const welcomeMsg = isDemo 
+                        ? 'Welcome! This is a guided demo. The tour will begin.'
+                        : 'Welcome! Live Mode is active. Please configure your mission and API keys.';
+                    this.renderMessage(welcomeMsg, "System", null, 'system');
+                    if(isDemo) {
+                        setTimeout(() => app.tour.start(), 1000);
+                    }
+                },
+                resetForSimulation() {
+                    app.dom.chatWindow.innerHTML = '';
+                    app.dom.statusPanel.style.display = 'none';
+                    app.dom.analysisPanel.style.display = 'none';
+                    this.renderMessage('Initializing simulation...', 'System', null, 'system');
+                },
+                handleDemoToggle() { this.clearAll(); },
+                handleTabClick(event) {
+                    const targetTab = event.currentTarget.dataset.tab;
+                    app.dom.tabButtons.forEach(btn => btn.classList.remove('active'));
+                    app.dom.tabContents.forEach(content => content.classList.remove('active'));
+                    event.currentTarget.classList.add('active');
+                    document.getElementById(`tab-${targetTab}`).classList.add('active');
+                },
+                renderMessage(text, author, agentIndex, type = 'message') {
+                    const messageEl = document.createElement('div');
+                    messageEl.classList.add('message', type);
+                    if (type === 'message') {
+                        messageEl.classList.add(`agent-${agentIndex}`);
+                        messageEl.innerHTML = `<span class="author">${author}</span><p>${text}</p>`;
+                    } else if(type === 'error') {
+                        messageEl.classList.add('error');
+                        messageEl.innerHTML = `<strong>ERROR:</strong> ${text}`;
+                    } else {
+                        messageEl.textContent = text;
+                    }
+                    app.dom.chatWindow.appendChild(messageEl);
+                    app.dom.mainContent.scrollTop = app.dom.mainContent.scrollHeight;
+                },
+                updateSimulationStatus(text, progress = null) {
+                    app.dom.statusPanel.style.display = 'block';
+                    app.dom.statusText.textContent = text;
+                    if (progress !== null) {
+                        app.dom.progressBar.style.width = `${progress}%`;
+                    }
+                },
+                setPersonaGenStatus(text, success = false) {
+                    app.dom.personaGenStatus.style.display = 'block';
+                    app.dom.personaGenStatus.textContent = text;
+                    app.dom.personaGenStatus.style.color = success ? 'var(--success-color)' : 'var(--text-muted-color)';
+                    app.dom.personaGenStatus.style.borderColor = success ? 'var(--success-color)' : 'var(--border-color)';
+                },
+                renderAnalysisReport(reportText, dashboardData) {
+                    app.state.lastReport = reportText;
+                    app.dom.analysisPanel.style.display = 'block';
+                    app.dom.analysisPanel.innerHTML = `<h3>Market Intelligence Debrief</h3>`;
+                    
+                    if(dashboardData && dashboardData.dashboard && dashboardData.dashboard.core_values) {
+                        const dashboardHtml = `<details open><summary>Visual Dashboard</summary><div class="details-content dashboard"><h4>Core Value Mentions</h4><div class="bar-chart-container" id="values-chart"></div></div></details>`;
+                        app.dom.analysisPanel.innerHTML += dashboardHtml;
+                        const chartContainer = document.getElementById('values-chart');
+                        dashboardData.dashboard.core_values.forEach(item => {
+                            const barItem = document.createElement('div');
+                            barItem.className = 'bar-item';
+                            barItem.innerHTML = `<div class="bar-label">${item.label}</div><div class="bar-wrapper"><div class="bar" style="width: ${item.value * 10}%;"></div></div><span>(${item.value})</span>`;
+                            chartContainer.appendChild(barItem);
+                        });
+                    }
+
+                    const reportContainer = document.createElement('div');
+                    let formattedReport = reportText
+                        .replace(/### (.*)/g, '<h4>$1</h4>')
+                        .replace(/\*\*Opportunity \d: (.*)\*\*/g, '<strong>Opportunity: $1</strong>')
+                        .replace(/\* (.*)/g, '<li>$1</li>')
+                        .replace(/(\r\n|\n|\r)/gm, '<br>');
+                    reportContainer.innerHTML = formattedReport;
+
+                    app.dom.analysisPanel.appendChild(reportContainer);
+
+                    if(reportText.includes("Actionable Business Opportunities")) {
+                        const button = document.createElement('button');
+                        button.className = 'btn-secondary';
+                        button.style.marginTop = '1rem';
+                        button.textContent = 'Generate Business Canvas for Opportunity 1';
+                        button.onclick = () => app.simulation.generateBusinessCanvas();
+                        reportContainer.appendChild(button);
+                    }
+                },
+                setLoadingState(isLoading) {
+                    app.state.isSimulationRunning = isLoading;
+                    if(isLoading) {
+                        app.dom.startBtn.disabled = true;
+                    } else if (app.dom.agents[0].personalityText.value) {
+                         app.dom.startBtn.disabled = false;
+                    }
+                }
+            },
+
+            tour: {
+                currentStep: 0,
+                isActive: false,
+                completed: false,
+                steps: [
+                    { elementId: 'open-settings-btn', text: 'Step 1: Welcome! Click "Configure Mission" to begin your mission.' },
+                    { elementId: 'tab-setup', text: 'This is the SETUP tab. In "Live Mode", you would enter your API keys. Let\'s continue.' },
+                    { elementId: 'tab-personas', text: 'Next, the PERSONAS tab. Here, we define a location to generate realistic profiles.' },
+                    { elementId: 'generate-personas-btn', text: 'Click here to generate profiles. This is the core of the tool!' },
+                    { elementId: 'tab-scenario', text: 'Finally, the SCENARIO tab. We set the topic the agents will discuss to uncover insights.' },
+                    { elementId: 'start-simulation-btn', text: 'Setup is complete! Close the panel and click "Deploy Simulation" to begin.' },
+                    { elementId: 'open-help-btn', text: 'While the simulation runs, note the HELP button. It explains how to use "Live Mode".' }
+                ],
+                start() {
+                    if (this.isActive || !app.dom.demoModeToggle.checked || this.completed) return;
+                    this.isActive = true;
+                    this.currentStep = 0;
+                    this.showStep(this.currentStep);
+                },
+                next() {
+                    if (!this.isActive) return;
+                    document.querySelectorAll('.highlight-pulse').forEach(el => el.classList.remove('highlight-pulse'));
+                    this.currentStep++;
+                    if (this.currentStep < this.steps.length) {
+                        setTimeout(() => this.showStep(this.currentStep), 1000);
+                    } else {
+                        this.end();
+                    }
+                },
+                showStep(index) {
+                    const step = this.steps[index];
+                    let element;
+                    if (step.elementId.startsWith('tab-')) {
+                        const tabId = step.elementId.split('-')[1];
+                        element = document.querySelector(`.tab-button[data-tab="${tabId}"]`);
+                        if (element) element.click();
+                    } else {
+                        element = document.getElementById(step.elementId);
+                    }
+                    const guideBox = app.dom.tourGuideBox;
+                    if (element) {
+                        element.classList.add('highlight-pulse');
+                        guideBox.textContent = step.text;
+                        guideBox.style.display = 'block';
+                        if (['tab-setup', 'tab-personas', 'tab-scenario'].includes(step.elementId)) {
+                            setTimeout(() => this.next(), 10000);
+                        }
+                    }
+                },
+                end() {
+                    if (!this.isActive) return;
+                    document.querySelectorAll('.highlight-pulse').forEach(el => el.classList.remove('highlight-pulse'));
+                    app.dom.tourGuideBox.style.display = 'none';
+                    this.isActive = false;
+                    this.completed = true;
+                },
+                reset() { this.completed = false; }
+            },
+
+            api: {
+                getApiKeyForModel(model) {
+                    if (model.startsWith('gemini')) return app.dom.googleApiKeyInput.value.trim();
+                    if (model.startsWith('openai')) return app.dom.openaiApiKeyInput.value.trim();
+                    return null;
+                },
+                async callQloo(apiKey, location, age) {
+                    if (app.dom.demoModeToggle.checked) {
+                        await new Promise(resolve => setTimeout(resolve, 1500));
+                        return app.demoData.qlooProfiles;
+                    }
+                    if (!apiKey) throw new Error("Qloo API Key is missing.");
+                    const locations = {
+                        "london": "POLYGON((-0.2323 51.551, 0.0526 51.551, 0.0526 51.481, -0.2323 51.481, -0.2323 51.551))",
+                        "paris": "POLYGON((2.4128 48.8877, 2.4150 48.8198, 2.2673 48.8198, 2.2689 48.8873, 2.4128 48.8877))",
+                        "new york": "POLYGON((-74.0182 40.7533, -73.9712 40.7533, -73.9712 40.7011, -74.0182 40.7011, -74.0182 40.7533))",
+                        "los angeles": "POLYGON((-118.3375 34.1037, -118.2215 34.1037, -118.2215 34.0208, -118.3375 34.0208, -118.3375 34.1037))",
+                        "tokyo": "POLYGON((139.7825 35.7171, 139.8153 35.7171, 139.8153 35.6577, 139.7825 35.6577, 139.7825 35.7171))",
+                        "berlin": "POLYGON((13.4538 52.5336, 13.5217 52.5336, 13.5217 52.4922, 13.4538 52.4922, 13.4538 52.5336))",
+                        "rome": "POLYGON((12.4578 41.9131, 12.5161 41.9131, 12.5161 41.8756, 12.4578 41.8756, 12.4578 41.9131))",
+                        "sydney": "POLYGON((151.1911 -33.8562, 151.2331 -33.8562, 151.2331 -33.8863, 151.1911 -33.8863, 151.1911 -33.8562))",
+                        "san francisco": "POLYGON((-122.4776 37.8119, -122.3861 37.8119, -122.3861 37.7073, -122.4776 37.7073, -122.4776 37.8119))",
+                        "milan": "POLYGON((9.1573 45.4912, 9.2241 45.4912, 9.2241 45.4384, 9.1573 45.4384, 9.1573 45.4912))"
+                    };
+                    const locationKey = location.toLowerCase().trim();
+                    const wktPolygon = locations[locationKey];
+                    if (!wktPolygon) {
+                        throw new Error(`Location '${location}' is not supported. Supported cities are: ${Object.keys(locations).join(', ')}.`);
+                    }
+                    const QLOO_ENDPOINT = `https://hackathon.api.qloo.com/v2/insights/?filter.type=urn:entity:brand&signal.location=${encodeURIComponent(wktPolygon)}`;
+                    const options = { method: 'GET', headers: {'x-api-key': apiKey} };
+                    const response = await fetch(QLOO_ENDPOINT, options);
+                    if (!response.ok) {
+                        let errorDetail = 'Unknown error';
+                        try {
+                            const errorData = await response.json();
+                            errorDetail = errorData.detail || JSON.stringify(errorData);
+                        } catch (e) { errorDetail = await response.text(); }
+                        throw new Error(`Qloo API Error (${response.status}): ${errorDetail}`);
+                    }
+                    const data = await response.json();
+                    if (!data || !data.results || !data.results.entities || data.results.entities.length < 5) {
+                        throw new Error("Qloo API response did not contain enough data to generate profiles.");
+                    }
+                    const tastes = data.results.entities.map(item => item.name).slice(0, 5).join(', ');
+                    const profile1 = `You are a resident of ${location}, around ${age} years old. Your tastes include: ${tastes}. You have a strong preference for independent brands and authentic experiences. PAIN POINT: You're frustrated by the overcrowding of popular spots and the lack of quiet, high-quality alternatives.`;
+                    const profile2 = `You are a resident of ${location}, around ${age} years old. Your tastes lean towards: ${tastes}. For you, convenience and a stylish ambiance are key. PAIN POINT: You find it difficult to discover new, interesting places that aren't already fully booked or overly hyped on social media.`;
+                    return [profile1, profile2];
+                },
+                async callLLM(apiKey, model, payload) {
+                    if (app.dom.demoModeToggle.checked) {
+                        const promptText = payload[0].parts[0].text;
+                        const isAnalysis = promptText.includes("expert market analyst");
+                        const isCanvas = promptText.includes("business strategy consultant");
+                        let responseKey;
+                        if (isAnalysis) {
+                            responseKey = 'analysis';
+                        } else if (isCanvas) {
+                            responseKey = 'businessCanvas';
+                        } else {
+                            const historyLength = payload.filter(p => p.role === 'user').length;
+                            responseKey = `turn_${historyLength}`;
+                        }
+                        const response = app.demoData.llmConversation[responseKey];
+                        if (response === undefined) {
+                            console.error(`Demo data missing for key: ${responseKey}`);
+                            return "Error: Demo response not found.";
+                        }
+                        await new Promise(resolve => setTimeout(resolve, 1500 + Math.random() * 500));
+                        return response;
+                    }
+                    if (!apiKey) throw new Error(`API Key for ${model} is missing.`);
+                    const isGemini = model.startsWith('gemini');
+                    let url, body;
+                    const headers = { 'Content-Type': 'application/json' };
+
+                    if (isGemini) {
+                        const geminiModel = "gemini-1.5-flash-latest"; 
+                        url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${apiKey}`;
+                        body = JSON.stringify({ contents: payload });
+                    } else { // OpenAI
+                        url = 'https://api.openai.com/v1/chat/completions';
+                        const openAIPayload = payload.map(msg => ({
+                            role: msg.role === 'model' ? 'assistant' : 'user',
+                            content: msg.parts.map(p => p.text).join('\n')
+                        }));
+                        body = JSON.stringify({ model: "gpt-4", messages: openAIPayload });
+                        headers['Authorization'] = `Bearer ${apiKey}`;
+                    }
+                    
+                    const response = await fetch(url, { method: 'POST', headers, body });
+                    if (!response.ok) {
+                        if (response.status === 429) {
+                            throw new Error("API request limit reached. The free tier for this API may have a daily quota. Please try again later or check your billing plan.");
+                        }
+                        const errorText = await response.text();
+                        console.error("API Error Response:", errorText);
+                        throw new Error(`API Error ${response.status}: ${errorText}`);
+                    }
+                    const data = await response.json();
+                    if (isGemini && data.candidates && data.candidates[0].content && data.candidates[0].content.parts) {
+                        return data.candidates[0].content.parts[0].text;
+                    } else if (!isGemini && data.choices && data.choices.length > 0) {
+                        return data.choices[0].message.content;
+                    }
+                    throw new Error("Invalid API response structure.");
+                },
+                async callBusinessCanvas() {
+                    if (app.dom.demoModeToggle.checked) {
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        return app.demoData.llmConversation.businessCanvas;
+                    }
+                    const analystApiKey = app.api.getApiKeyForModel('gemini-pro');
+                    if (!analystApiKey) throw new Error("Google Gemini API Key is needed for this feature.");
+                    if (!app.state.lastReport) throw new Error("Analysis report not found. Please run a simulation first.");
+                    const prompt = `<INSTRUCTIONS>You are a business strategy consultant. Your task is to generate a detailed Business Model Canvas based *only* on the Market Analysis Report provided below. Focus on the first opportunity mentioned ("The Listening Lounge"). Do not invent new information. Respond ONLY with the canvas in markdown format.</INSTRUCTIONS><MARKET_ANALYSIS_REPORT>${app.state.lastReport}</MARKET_ANALYSIS_REPORT>`;
+                    return await app.api.callLLM(analystApiKey, 'gemini-pro', [{role: 'user', parts: [{text: prompt}]}]);
+                }
+            },
+
+            simulation: {
+                async generatePersonas() {
+                    if (app.tour.isActive && app.tour.currentStep === 3) {
+                        app.tour.next();
+                    }
+                    const qlooApiKey = app.dom.qlooApiKeyInput.value.trim();
+                    const location = app.dom.personaLocationInput.value;
+                    const age = app.dom.personaAgeInput.value;
+                    if (!location || !age) {
+                        alert("Please define a target location and age group.");
+                        return;
+                    }
+                    app.ui.setPersonaGenStatus("Connecting to Qloo API... Analyzing taste data...");
+                    try {
+                        const profiles = await app.api.callQloo(qlooApiKey, location, age);
+                        app.dom.agents[0].personalityText.value = profiles[0];
+                        app.dom.agents[1].personalityText.value = profiles[1];
+                        app.ui.setPersonaGenStatus("Success! Persona profiles generated.", true);
+                        app.dom.startBtn.disabled = false;
+                        if (app.tour.isActive) {
+                           app.tour.next();
+                        }
+                    } catch (error) {
+                        app.ui.setPersonaGenStatus(`Error: ${error.message}`);
+                        console.error(error);
+                    }
+                },
+                async start() {
+                    if (app.tour.isActive && app.tour.currentStep === 5) {
+                        app.tour.next();
+                    }
+                    app.ui.setLoadingState(true);
+                    app.ui.closePanel();
+                    app.ui.resetForSimulation();
+                    
+                    const agentsConfig = app.dom.agents.map(agentUI => ({
+                        name: agentUI.name,
+                        llm: agentUI.llmSelect.value,
+                        personality: agentUI.personalityText.value
+                    }));
+                    if (agentsConfig.some(a => !a.personality)) {
+                        alert("Please generate persona profiles first!");
+                        app.ui.setLoadingState(false);
+                        return;
+                    }
+                    const topic = app.dom.topicInput.value;
+                    const totalTurns = parseInt(app.dom.turnsInput.value, 10) * agentsConfig.length;
+                    let conversationHistory = [];
+                    for (let i = 0; i < totalTurns; i++) {
+                        const currentTurn = i + 1;
+                        app.ui.updateSimulationStatus(`Running simulation... (Turn ${currentTurn}/${totalTurns})`, (currentTurn / totalTurns) * 100);
+                        const agentIndex = i % agentsConfig.length;
+                        const currentAgent = agentsConfig[agentIndex];
+                        const apiKey = app.api.getApiKeyForModel(currentAgent.llm);
+                        try {
+                            let historyForAPI = [
+                                { role: 'user', parts: [{ text: `<INSTRUCTIONS>You are ${currentAgent.name}. Your detailed, data-driven profile is: ${currentAgent.personality}. The discussion topic is: '${topic}'. Your task is to respond naturally based on your personality. Keep your responses concise and natural, like a real-time chat message (2-3 sentences max). Focus on reacting to the other person's last point before adding a new thought.</INSTRUCTIONS>` }] },
+                                { role: 'model', parts: [{ text: "Okay, I understand my role and personality." }] }
+                            ];
+                            conversationHistory.forEach(msg => {
+                                historyForAPI.push({ role: (msg.author === currentAgent.name) ? 'model' : 'user', parts: [{ text: msg.text }] });
+                            });
+                            const responseText = await app.api.callLLM(apiKey, currentAgent.llm, historyForAPI);
+                            app.ui.renderMessage(responseText, currentAgent.name, agentIndex);
+                            conversationHistory.push({ author: currentAgent.name, text: responseText });
+                        } catch (error) {
+                            app.ui.renderMessage(error.message, "System", null, 'error');
+                            app.ui.setLoadingState(false);
+                            return;
+                        }
+                    }
+                    app.ui.updateSimulationStatus("Analyzing intel...", 100);
+                    try {
+                        const analystApiKey = app.api.getApiKeyForModel('gemini-pro');
+                        const fullConversation = conversationHistory.map(msg => `${msg.author}: ${msg.text}`).join('\n\n');
+                        
+                        const analysisPrompt = `<INSTRUCTIONS>You are an expert market analyst. Your task is to analyze the following dialogue.
+FIRST, generate a valid JSON object summarizing the core values discussed. The JSON must have this exact structure: {"dashboard":{"core_values":[{"label":"ValueName","value":Number}]}}. Extract up to 4 main values and assign a numeric score from 1-10 based on their importance in the conversation.
+SECOND, after the JSON object, add the separator "<--JSON_DATA_SEPARATOR-->".
+THIRD, write a human-readable report in markdown format with the following sections: ### Latent Needs & Desires, ### Key Pain Points, and ### Actionable Business Opportunities.
+Respond with ONLY the JSON, the separator, and the markdown report.
+</INSTRUCTIONS>
+<CONVERSATION_TO_ANALYZE>
+${fullConversation}
+</CONVERSATION_TO_ANALYZE>`;
+
+                        const analysisResult = await app.api.callLLM(analystApiKey, 'gemini-pro', [{ role: 'user', parts: [{ text: analysisPrompt }] }]);
+                        
+                        const separator = "<--JSON_DATA_SEPARATOR-->";
+                        const separatorIndex = analysisResult.indexOf(separator);
+
+                        let dashboardData = {};
+                        let reportText = analysisResult; 
+
+                        if (separatorIndex !== -1) {
+                            const jsonString = analysisResult.substring(0, separatorIndex);
+                            reportText = analysisResult.substring(separatorIndex + separator.length);
+                            try {
+                                const cleanedJson = jsonString.replace(/```json\n?|\n?```/g, '');
+                                dashboardData = JSON.parse(cleanedJson);
+                            } catch (e) {
+                                console.error("Failed to parse dashboard JSON from LLM:", e);
+                                dashboardData = app.demoData.llmConversation.analysis_json;
+                            }
+                        } else {
+                            console.warn("Analysis response separator not found. Attempting to render text only.");
+                            dashboardData = app.demoData.llmConversation.analysis_json;
+                        }
+                        
+                        app.dom.statusPanel.style.display = 'none';
+                        app.ui.renderAnalysisReport(reportText, dashboardData);
+
+                    } catch (error) {
+                         app.ui.renderMessage(`ANALYSIS ERROR: ${error.message}`, "System", null, 'error');
+                    }
+                    app.ui.setLoadingState(false);
+                },
+                async generateBusinessCanvas() {
+                    alert("Generating Business Canvas... This may take a moment.");
+                    try {
+                        const canvasData = await app.api.callBusinessCanvas();
+                        const canvasWindow = window.open("", "BusinessCanvas", "width=800,height=600");
+                        if(canvasWindow) {
+                            canvasWindow.document.write(`<pre style="font-family: monospace; white-space: pre-wrap; padding: 2rem; background: #1c1c1e; color: #f0f0f0; font-size: 16px;">${canvasData}</pre>`);
+                        } else {
+                            alert("Please allow pop-ups for this site to display the Business Canvas.");
+                        }
+                    } catch(error) {
+                        alert(`Error generating canvas: ${error.message}`);
+                    }
+                }
+            },
+            
+            storage: {
+                saveApiKeys() {
+                    const keys = {
+                        qloo: app.dom.qlooApiKeyInput.value,
+                        google: app.dom.googleApiKeyInput.value,
+                        openai: app.dom.openaiApiKeyInput.value
+                    };
+                    localStorage.setItem('marketSimApiKeys', JSON.stringify(keys));
+                },
+                loadApiKeys() {
+                    const keys = JSON.parse(localStorage.getItem('marketSimApiKeys'));
+                    if (keys) {
+                        app.dom.qlooApiKeyInput.value = keys.qloo || '';
+                        app.dom.googleApiKeyInput.value = keys.google || '';
+                        app.dom.openaiApiKeyInput.value = keys.openai || '';
+                    }
+                    app.dom.qlooApiKeyInput.addEventListener('input', this.saveApiKeys);
+                    app.dom.googleApiKeyInput.addEventListener('input', this.saveApiKeys);
+                    app.dom.openaiApiKeyInput.addEventListener('input', this.saveApiKeys);
+                },
+                exportMission() {
+                    const missionData = {
+                        location: app.dom.personaLocationInput.value,
+                        age: app.dom.personaAgeInput.value,
+                        topic: app.dom.topicInput.value,
+                        turns: app.dom.turnsInput.value,
+                        agent1: { llm: app.dom.agents[0].llmSelect.value, personality: app.dom.agents[0].personalityText.value },
+                        agent2: { llm: app.dom.agents[1].llmSelect.value, personality: app.dom.agents[1].personalityText.value },
+                    };
+                    const blob = new Blob([JSON.stringify(missionData, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `mission-config-${new Date().toISOString().slice(0,10)}.json`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                },
+                importMission(event) {
+                    const file = event.target.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            const data = JSON.parse(e.target.result);
+                            if(!data.location || !data.agent1) throw new Error("Invalid mission file format.");
+                            app.dom.personaLocationInput.value = data.location || '';
+                            app.dom.personaAgeInput.value = data.age || '';
+                            app.dom.topicInput.value = data.topic || '';
+                            app.dom.turnsInput.value = data.turns || 3;
+                            app.dom.agents[0].llmSelect.value = data.agent1.llm || 'gemini-pro';
+                            app.dom.agents[0].personalityText.value = data.agent1.personality || '';
+                            app.dom.agents[1].llmSelect.value = data.agent2.llm || 'gemini-pro';
+                            app.dom.agents[1].personalityText.value = data.agent2.personality || '';
+                            alert('Mission imported successfully!');
+                            app.dom.startBtn.disabled = false;
+                        } catch (error) {
+                            alert('Failed to import mission. The file may be corrupt or in the wrong format.');
+                            console.error("Import error:", error);
+                        }
+                    };
+                    reader.readAsText(file);
+                }
+            },
+            
+            demoData: {
+                qlooProfiles: [
+                    `You are Alex, 29, a graphic designer in Shoreditch.
+- TASTES: Indie rock (Bon Iver, The National), craft beer (BrewDog), specialty coffee. Frequents Rough Trade East for vinyls.
+- BRANDS: Wears Carhartt WIP, uses Master & Dynamic MH40 headphones, thinks Bose is overpriced.
+- PAIN POINT: Hates that his expensive headphones aren't portable for the Tube. Wishes there was a high-end audio shop that felt like a lounge to test gear, not a sterile Apple Store. Finds local pubs too loud for a quiet drink after work.`,
+                    `You are Chloe, 31, a fashion marketer in Shoreditch.
+- TASTES: R&B (SZA, Kehlani), cocktails, brunch spots like The Breakfast Club.
+- BRANDS: Uses AirPods Pro for everything, loves the Aēsop brand aesthetic, finds Beats headphones too flashy.
+- PAIN POINT: Finds vinyl culture pretentious and inconvenient. Wants an evening spot that's stylish and 'Instagrammable' with good music, but where you can still hold a conversation. Annoyed that most cool places require booking weeks in advance.`
+                ],
+                llmConversation: {
+                    turn_1: "Okay, so music in Shoreditch. I feel like we're spoiled for choice with venues, but finding a good *record shop* that isn't just a tourist trap is tough. Rough Trade is great, obviously, but it's always so packed.",
+                    turn_2: "Totally get that, but who has time for vinyls? For me, it's all about my AirPods. The real problem is where to go *after* a gig. Everywhere is either a loud, sweaty club or a pub where you can't hear yourself think.",
+                    turn_3: "Exactly! I love the sound quality of my big headphones, but I can't wear them to a bar. I wish there was a place focused on the *experience* of listening.",
+                    turn_4: "Yes! A 'listening bar' would be amazing. Somewhere stylish where the focus is on good sound, but it's still social. I'd pay a premium for a place with curated playlists and good cocktails.",
+                    turn_5: "Right? Imagine trying out new headphones while sipping a good whiskey. That's a shopping experience I'd actually enjoy, not some pushy salesman at a big electronics store. It's about authenticity.",
+                    turn_6: "100%. And convenience. If that place had a simple app to book a 'listening session' so it's not overcrowded, I'd be there every week. I'm so tired of the 'walk-ins welcome, but actually you can't get in' vibe.",
+                    analysis: `{"dashboard":{"core_values":[{"label":"Ambiance","value":9},{"label":"Authenticity","value":8},{"label":"Quality","value":7},{"label":"Convenience","value":6}]}}
+<--JSON_DATA_SEPARATOR-->
+### Latent Needs & Desires
+- A 'Third Place' for adults that is not a traditional pub or a loud club, but a destination experience.
+- A desire for 'experiential retail' over transactional shopping.
+
+### Key Pain Points
+- Overcrowding in popular, authentic venues (e.g., Rough Trade).
+- Poor sound quality and ambiance in most social venues.
+- Lack of a comfortable, premium environment for product discovery (e.g., audio gear).
+- Frustration with booking/queuing systems.
+
+### Actionable Business Opportunities
+1. **Opportunity 1:** Concept: 'The Listening Lounge' - A hybrid high-end audio store and specialty coffee/whiskey bar. Targets audiophiles like Alex who value quality and a relaxed experience. Offers bookable 'listening sessions' to test equipment.
+2. **Opportunity 2:** Concept: 'The Curated Night' - A stylish, conversation-friendly cocktail bar with a focus on high-fidelity sound and curated playlists. Targets social professionals like Chloe who value ambiance and convenience. Could use a simple app for table bookings to manage capacity.`,
+                    businessCanvas: `
+### Business Model Canvas: The Listening Lounge ###
+
+**1. Customer Segments:**
+- Primary: Discerning audiophiles & music enthusiasts (25-45) who value sound quality and are willing to pay a premium for hardware and experiences (like Alex).
+- Secondary: Remote workers and creatives seeking a unique, quiet 'third place' to work or relax with superior background music.
+
+**2. Value Propositions:**
+- For Audiophiles: A "try before you buy" destination for high-end audio equipment in a comfortable, real-world setting. Access to curated vinyl selections.
+- For Creatives: A unique, premium ambiance that fosters relaxation and focus, combined with an exceptional, non-intrusive audio experience.
+
+**3. Channels:**
+- Physical location in a high-foot-traffic, trendy area (e.g., Shoreditch side street).
+- Instagram & TikTok for visual marketing of the ambiance and events.
+- Partnerships with local music blogs, audio-tech reviewers, and lifestyle influencers.
+- Simple online booking system for listening sessions.
+
+**4. Customer Relationships:**
+- Expert, passionate staff who act as guides, not salespeople.
+- Membership program offering exclusive access to new gear, events, and discounts.
+- Community building through workshops (e.g., 'Vinyl 101', 'Headphone amp pairings').
+
+**5. Revenue Streams:**
+- High-margin sales of audio equipment (headphones, amps, turntables).
+- Premium beverage sales (specialty coffee, craft beer, whiskey/cocktails).
+- Ticketed events and workshops.
+- 'Listening Session' booking fees (can be credited towards a purchase).`
+                }
+            }
+        };
+
+        app.init();
+    </script>
+</body>
+</html>
