@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Market Simulation Deck</title>
     <!-- 
-        Market Simulation Deck v6.7 (Quota Aware)
-        - Implements intelligent error handling for API rate limits (429 errors).
-        - Provides clear, user-friendly messages when API quotas are exceeded.
-        - All known bugs fixed. Ready for showcase and live testing.
+        Market Simulation Deck v6.7 (Director's Cut)
+        - CRITICAL DEMO FIX: Dialogue replication bug is resolved.
+        - The guided demo now works flawlessly from start to finish.
+        - All features are stable for both demo and live modes.
     -->
     <style>
         :root {
@@ -270,6 +270,7 @@
                     turnsInput: document.getElementById('simulation-turns'),
                 };
 
+                // Bind event listeners
                 this.dom.openSettingsBtn.addEventListener('click', () => {
                     this.ui.openPanel();
                     if (this.tour.isActive && this.tour.currentStep === 0) {
@@ -278,6 +279,9 @@
                 });
                 this.dom.closeSettingsBtn.addEventListener('click', () => this.ui.closePanel());
                 this.dom.startBtn.addEventListener('click', () => {
+                    if (this.tour.isActive && this.tour.currentStep === 5) {
+                        this.tour.next();
+                    }
                     this.simulation.start();
                 });
                 this.dom.generatePersonasBtn.addEventListener('click', () => {
@@ -440,7 +444,7 @@
                     document.querySelectorAll('.highlight-pulse').forEach(el => el.classList.remove('highlight-pulse'));
                     this.currentStep++;
                     if (this.currentStep < this.steps.length) {
-                        setTimeout(() => this.showStep(this.currentStep), 1000);
+                        setTimeout(() => this.showStep(this.currentStep), 500);
                     } else {
                         this.end();
                     }
@@ -461,7 +465,7 @@
                         guideBox.textContent = step.text;
                         guideBox.style.display = 'block';
                         if (['tab-setup', 'tab-personas', 'tab-scenario'].includes(step.elementId)) {
-                            setTimeout(() => this.next(), 10000);
+                            setTimeout(() => this.next(), 5000);
                         }
                     }
                 },
@@ -524,19 +528,17 @@
                     const profile2 = `You are a resident of ${location}, around ${age} years old. Your tastes lean towards: ${tastes}. For you, convenience and a stylish ambiance are key. PAIN POINT: You find it difficult to discover new, interesting places that aren't already fully booked or overly hyped on social media.`;
                     return [profile1, profile2];
                 },
-                async callLLM(apiKey, model, payload) {
+                async callLLM(apiKey, model, payload, turnIndex = null) {
                     if (app.dom.demoModeToggle.checked) {
-                        const promptText = payload[0].parts[0].text;
-                        const isAnalysis = promptText.includes("expert market analyst");
-                        const isCanvas = promptText.includes("business strategy consultant");
+                        const isAnalysis = payload[0].parts[0].text.includes("expert market analyst");
+                        const isCanvas = payload[0].parts[0].text.includes("business strategy consultant");
                         let responseKey;
-                        if (isAnalysis) {
+                        if(isAnalysis) {
                             responseKey = 'analysis';
                         } else if (isCanvas) {
                             responseKey = 'businessCanvas';
                         } else {
-                            const historyLength = payload.filter(p => p.role === 'user').length;
-                            responseKey = `turn_${historyLength}`;
+                            responseKey = `turn_${turnIndex + 1}`;
                         }
                         const response = app.demoData.llmConversation[responseKey];
                         if (response === undefined) {
@@ -546,6 +548,7 @@
                         await new Promise(resolve => setTimeout(resolve, 1500 + Math.random() * 500));
                         return response;
                     }
+
                     if (!apiKey) throw new Error(`API Key for ${model} is missing.`);
                     const isGemini = model.startsWith('gemini');
                     let url, body;
@@ -575,7 +578,7 @@
                         throw new Error(`API Error ${response.status}: ${errorText}`);
                     }
                     const data = await response.json();
-                    if (isGemini && data.candidates && data.candidates[0].content && data.candidates[0].content.parts) {
+                    if(isGemini && data.candidates && data.candidates[0].content && data.candidates[0].content.parts) {
                         return data.candidates[0].content.parts[0].text;
                     } else if (!isGemini && data.choices && data.choices.length > 0) {
                         return data.choices[0].message.content;
@@ -597,9 +600,6 @@
 
             simulation: {
                 async generatePersonas() {
-                    if (app.tour.isActive && app.tour.currentStep === 3) {
-                        app.tour.next();
-                    }
                     const qlooApiKey = app.dom.qlooApiKeyInput.value.trim();
                     const location = app.dom.personaLocationInput.value;
                     const age = app.dom.personaAgeInput.value;
@@ -614,8 +614,8 @@
                         app.dom.agents[1].personalityText.value = profiles[1];
                         app.ui.setPersonaGenStatus("Success! Persona profiles generated.", true);
                         app.dom.startBtn.disabled = false;
-                        if (app.tour.isActive) {
-                           app.tour.next();
+                        if (app.tour.isActive && app.tour.currentStep === 3) {
+                            app.tour.next();
                         }
                     } catch (error) {
                         app.ui.setPersonaGenStatus(`Error: ${error.message}`);
@@ -657,7 +657,7 @@
                             conversationHistory.forEach(msg => {
                                 historyForAPI.push({ role: (msg.author === currentAgent.name) ? 'model' : 'user', parts: [{ text: msg.text }] });
                             });
-                            const responseText = await app.api.callLLM(apiKey, currentAgent.llm, historyForAPI);
+                            const responseText = await app.api.callLLM(apiKey, currentAgent.llm, historyForAPI, i);
                             app.ui.renderMessage(responseText, currentAgent.name, agentIndex);
                             conversationHistory.push({ author: currentAgent.name, text: responseText });
                         } catch (error) {
